@@ -3,13 +3,11 @@ import { MovieDetailsResponse, MovieDetailProps } from '../types'
 import { Button } from './ui/button'
 import { Badge } from './ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card'
-import { Separator } from './ui/separator'
 import { Skeleton } from './ui/skeleton'
 import { Alert, AlertDescription } from './ui/alert'
 import { useUser } from '../contexts/UserContext'
 import { useMovies } from '../contexts/MovieContext'
 import { useSettings } from '../contexts/SettingsContext'
-import { MovieApiService, MockApiService } from '../services/api'
 import { ArrowLeft, Star, Calendar, Clock, DollarSign, Heart, HeartOff, Loader2 } from 'lucide-react'
 import { ImageWithFallback } from './figma/ImageWithFallback'
 
@@ -121,19 +119,12 @@ export const MovieDetail: React.FC<MovieDetailProps> = ({ movieId, onBack }) => 
   }
 
   const getImageUrl = (path: string | null, size = 'w500') => {
-    if (isConfigured && settings.apiKey) {
-      const apiService = new MovieApiService({
-        baseUrl: settings.baseUrl,
-        apiKey: settings.apiKey,
-        language: settings.language,
-        includeAdult: settings.includeAdult,
-        region: settings.region
-      })
-      return size === 'w1280' ? apiService.getBackdropUrl(path) : apiService.getImageUrl(path)
-    } else {
-      const mockService = new MockApiService()
-      return size === 'w1280' ? mockService.getBackdropUrl(path) : mockService.getImageUrl(path)
-    }
+    if (!path) return '/placeholder-movie.jpg'
+    
+    // Use the image base URL from settings, fallback to TMDB default
+    const imageBaseUrl = settings.imageBaseUrl || 'https://image.tmdb.org/t/p'
+    const imageSize = size === 'w1280' ? 'w1280' : 'w500'
+    return `${imageBaseUrl}/${imageSize}${path}`
   }
 
   return (

@@ -21,13 +21,18 @@ class MovieApiService {
     this.config = { ...this.config, ...newConfig }
   }
 
+  private validatePage(page: number): number {
+    // Ensure page is a valid integer between 1 and 500 (TMDB API limit)
+    const validPage = Math.max(1, Math.min(500, Math.floor(Math.abs(page || 1))))
+    return validPage
+  }
+
   private async fetchFromApi<T>(endpoint: string, params: Record<string, string> = {}): Promise<T> {
     if (!this.config.apiKey) {
       throw new Error('API key is required. Please configure your TMDB API key in settings.')
     }
 
     const url = new URL(`${this.config.baseUrl}${endpoint}`)
-    url.searchParams.append('api_key', this.config.apiKey)
     url.searchParams.append('language', this.config.language)
     
     if (!this.config.includeAdult) {
@@ -44,7 +49,12 @@ class MovieApiService {
     })
 
     try {
-      const response = await fetch(url.toString())
+      const response = await fetch(url.toString(), {
+        headers: {
+          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Accept': 'application/json'
+        }
+      })
       
       if (!response.ok) {
         const errorData: ApiError = await response.json().catch(() => ({
@@ -62,13 +72,73 @@ class MovieApiService {
     }
   }
 
+  getImageUrl(path: string | null, size: ImageSize = 'w500'): string {
+    if (!path) return '/placeholder-movie.jpg'
+    return `${this.config.imageBaseUrl || 'https://image.tmdb.org/t/p'}/${size}${path}`
+  }
+
+  getBackdropUrl(path: string | null, size: BackdropSize = 'w1280'): string {
+    if (!path) return '/placeholder-backdrop.jpg'
+    return `${this.config.imageBaseUrl || 'https://image.tmdb.org/t/p'}/${size}${path}`
+  }
+
   async getPopularMovies(page = 1): Promise<MoviesResponse> {
+    const validPage = this.validatePage(page)
     return this.fetchFromApi<MoviesResponse>(API_ENDPOINTS.POPULAR, {
-      page: page.toString()
+      page: validPage.toString()
     })
   }
 
-  async searchMovies(query: string, page = 1): Promise<MoviesResponse> {
+  async getNowPlayingMovies(page = 1): Promise<MoviesResponse> {
+    const validPage = this.validatePage(page)
+    return this.fetchFromApi<MoviesResponse>('/movie/now_playing', {
+      page: validPage.toString()
+    })
+  }
+
+  async getTopRatedMovies(page = 1): Promise<MoviesResponse> {
+    const validPage = this.validatePage(page)
+    return this.fetchFromApi<MoviesResponse>('/movie/top_rated', {
+      page: validPage.toString()
+    })
+  }
+
+  async getUpcomingMovies(page = 1): Promise<MoviesResponse> {
+    const validPage = this.validatePage(page)
+    return this.fetchFromApi<MoviesResponse>('/movie/upcoming', {
+      page: validPage.toString()
+    })
+  }
+
+  async discoverMovies(page = 1, filters?: any): Promise<MoviesResponse> {
+    const validPage = this.validatePage(page)
+    const params: Record<string, string> = {
+      page: validPage.toString()
+    }
+
+    if (filters) {
+      if (filters.genres && filters.genres.length > 0) {
+        params.with_genres = filters.genres.join(',')
+      }
+      if (filters.year) {
+        params.year = filters.year.toString()
+      }
+      if (filters.sortBy) {
+        params.sort_by = filters.sortBy
+      }
+      if (filters.rating) {
+        params['vote_average.gte'] = filters.rating.toString()
+      }
+    }
+
+    return this.fetchFromApi<MoviesResponse>('/discover/movie', params)
+  }
+
+  async getMovieVideos(id: number): Promise<{ results: Array<{ key: string; type: string; site: string; name: string }> }> {
+    return this.fetchFromApi<{ results: Array<{ key: string; type: string; site: string; name: string }> }>(`/movie/${id}/videos`)
+  }
+
+  async searchMovies(query: string, page = 1, filters?: any): Promise<MoviesResponse> {
     if (!query.trim()) {
       return {
         page: 1,
@@ -78,37 +148,27 @@ class MovieApiService {
       }
     }
 
-    return this.fetchFromApi<MoviesResponse>(API_ENDPOINTS.SEARCH, {
-      query: encodeURIComponent(query),
-      page: page.toString()
-    })
+    const validPage = this.validatePage(page)
+    const params: Record<string, string> = {
+      query: query.trim(),
+      page: validPage.toString()
+    }
+
+    if (filters?.year) {
+      params.year = filters.year.toString()
+    }
+
+    return this.fetchFromApi<MoviesResponse>('/search/movie', params)
   }
 
   async getMovieDetails(id: number): Promise<MovieDetailsResponse> {
-    const [details, credits] = await Promise.all([
-      this.fetchFromApi<MovieDetailsResponse>(`${API_ENDPOINTS.MOVIE_DETAILS}/${id}`),
-      this.fetchFromApi<any>(`${API_ENDPOINTS.MOVIE_DETAILS}/${id}/credits`)
-    ])
-
-    return {
-      ...details,
-      cast: credits.cast?.slice(0, 10) || [],
-      crew: credits.crew?.slice(0, 10) || []
-    }
+    return this.fetchFromApi<MovieDetailsResponse>(`/movie/${id}`, {
+      append_to_response: 'credits,videos,images'
+    })
   }
 
   async getGenres(): Promise<{ genres: Genre[] }> {
-    return this.fetchFromApi<{ genres: Genre[] }>(API_ENDPOINTS.GENRES)
-  }
-
-  getImageUrl(path: string | null, size: ImageSize = 'w500'): string {
-    if (!path) return '/placeholder-movie.jpg'
-    return `${DEFAULT_SETTINGS.imageBaseUrl}/${size}${path}`
-  }
-
-  getBackdropUrl(path: string | null, size: BackdropSize = 'w1280'): string {
-    if (!path) return '/placeholder-backdrop.jpg'
-    return `${DEFAULT_SETTINGS.imageBaseUrl}/${size}${path}`
+    return this.fetchFromApi<{ genres: Genre[] }>('/genre/movie/list')
   }
 }
 
@@ -215,10 +275,50 @@ const MOCK_MOVIES: Movie[] = [
     popularity: 65.432,
     video: false,
     vote_count: 30000
+  },
+  {
+    id: 7,
+    title: "Interstellar",
+    overview: "A team of explorers travel through a wormhole in space in an attempt to ensure humanity's survival.",
+    poster_path: "/gEU2QniE6E77NI6lCU6MxlNBvIx.jpg",
+    backdrop_path: "/xJHokMbljvjADYdit5fK5VQsXEG.jpg",
+    vote_average: 8.6,
+    release_date: "2014-11-07",
+    genre_ids: [12, 18, 878],
+    genres: [{ id: 12, name: "Adventure" }, { id: 18, name: "Drama" }, { id: 878, name: "Science Fiction" }],
+    adult: false,
+    original_language: "en",
+    original_title: "Interstellar",
+    popularity: 54.321,
+    video: false,
+    vote_count: 28000
+  },
+  {
+    id: 8,
+    title: "The Matrix",
+    overview: "A computer hacker learns from mysterious rebels about the true nature of his reality and his role in the war against its controllers.",
+    poster_path: "/f89U3ADr1oiB1s9GkdPOEpXUk5H.jpg",
+    backdrop_path: "/fNG7i7RqMErkcqhohV2a6cV1Ehy.jpg",
+    vote_average: 8.7,
+    release_date: "1999-03-30",
+    genre_ids: [28, 878],
+    genres: [{ id: 28, name: "Action" }, { id: 878, name: "Science Fiction" }],
+    adult: false,
+    original_language: "en",
+    original_title: "The Matrix",
+    popularity: 43.210,
+    video: false,
+    vote_count: 24000
   }
 ]
 
 class MockApiService {
+  private validatePage(page: number): number {
+    // Ensure page is a valid integer between 1 and 500 (TMDB API limit)
+    const validPage = Math.max(1, Math.min(500, Math.floor(Math.abs(page || 1))))
+    return validPage
+  }
+
   getImageUrl(path: string | null, size: ImageSize = 'w500'): string {
     if (!path) return '/placeholder-movie.jpg'
     return `https://image.tmdb.org/t/p/${size}${path}`
@@ -233,20 +333,131 @@ class MockApiService {
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 800))
     
-    const perPage = 6
-    const startIndex = (page - 1) * perPage
+    const validPage = this.validatePage(page)
+    const perPage = 20
+    const startIndex = (validPage - 1) * perPage
     const endIndex = startIndex + perPage
     const movies = MOCK_MOVIES.slice(startIndex, endIndex)
     
     return {
-      page,
+      page: validPage,
       results: movies,
       total_pages: Math.ceil(MOCK_MOVIES.length / perPage),
       total_results: MOCK_MOVIES.length
     }
   }
 
-  async searchMovies(query: string, page = 1): Promise<MoviesResponse> {
+  async getNowPlayingMovies(page = 1): Promise<MoviesResponse> {
+    return this.getPopularMovies(page)
+  }
+
+  async getTopRatedMovies(page = 1): Promise<MoviesResponse> {
+    await new Promise(resolve => setTimeout(resolve, 800))
+    
+    const validPage = this.validatePage(page)
+    const sortedMovies = [...MOCK_MOVIES].sort((a, b) => b.vote_average - a.vote_average)
+    const perPage = 20
+    const startIndex = (validPage - 1) * perPage
+    const endIndex = startIndex + perPage
+    const movies = sortedMovies.slice(startIndex, endIndex)
+    
+    return {
+      page: validPage,
+      results: movies,
+      total_pages: Math.ceil(MOCK_MOVIES.length / perPage),
+      total_results: MOCK_MOVIES.length
+    }
+  }
+
+  async getUpcomingMovies(page = 1): Promise<MoviesResponse> {
+    return this.getPopularMovies(page)
+  }
+
+  async discoverMovies(page = 1, filters?: any): Promise<MoviesResponse> {
+    await new Promise(resolve => setTimeout(resolve, 800))
+    
+    const validPage = this.validatePage(page)
+    let filteredMovies = [...MOCK_MOVIES]
+    
+    if (filters) {
+      if (filters.genres && filters.genres.length > 0) {
+        filteredMovies = filteredMovies.filter(movie => 
+          filters.genres.some((genreId: number) => movie.genre_ids.includes(genreId))
+        )
+      }
+      
+      if (filters.year) {
+        filteredMovies = filteredMovies.filter(movie => 
+          new Date(movie.release_date).getFullYear() === filters.year
+        )
+      }
+      
+      if (filters.rating) {
+        filteredMovies = filteredMovies.filter(movie => 
+          movie.vote_average >= filters.rating
+        )
+      }
+      
+      if (filters.sortBy) {
+        switch (filters.sortBy) {
+          case 'popularity.desc':
+            filteredMovies.sort((a, b) => (b.popularity || 0) - (a.popularity || 0))
+            break
+          case 'popularity.asc':
+            filteredMovies.sort((a, b) => (a.popularity || 0) - (b.popularity || 0))
+            break
+          case 'vote_average.desc':
+            filteredMovies.sort((a, b) => b.vote_average - a.vote_average)
+            break
+          case 'vote_average.asc':
+            filteredMovies.sort((a, b) => a.vote_average - b.vote_average)
+            break
+          case 'release_date.desc':
+            filteredMovies.sort((a, b) => new Date(b.release_date).getTime() - new Date(a.release_date).getTime())
+            break
+          case 'release_date.asc':
+            filteredMovies.sort((a, b) => new Date(a.release_date).getTime() - new Date(b.release_date).getTime())
+            break
+          case 'title.asc':
+            filteredMovies.sort((a, b) => a.title.localeCompare(b.title))
+            break
+          case 'title.desc':
+            filteredMovies.sort((a, b) => b.title.localeCompare(a.title))
+            break
+        }
+      }
+    }
+    
+    const perPage = 20
+    const startIndex = (validPage - 1) * perPage
+    const endIndex = startIndex + perPage
+    const movies = filteredMovies.slice(startIndex, endIndex)
+    
+    return {
+      page: validPage,
+      results: movies,
+      total_pages: Math.ceil(filteredMovies.length / perPage),
+      total_results: filteredMovies.length
+    }
+  }
+
+  async getMovieVideos(id: number): Promise<{ results: Array<{ key: string; type: string; site: string; name: string }> }> {
+    await new Promise(resolve => setTimeout(resolve, 300))
+    
+    // Mock trailer data
+    return {
+      results: [
+        {
+          key: 'dQw4w9WgXcQ', // Rick Roll as placeholder
+          type: 'Trailer',
+          site: 'YouTube',
+          name: 'Official Trailer'
+        }
+      ]
+    }
+  }
+
+  async searchMovies(query: string, page = 1, filters?: any): Promise<MoviesResponse> {
     await new Promise(resolve => setTimeout(resolve, 600))
     
     if (!query.trim()) {
@@ -258,15 +469,28 @@ class MockApiService {
       }
     }
 
-    const filteredMovies = MOCK_MOVIES.filter(movie => 
+    const validPage = this.validatePage(page)
+    
+    let filteredMovies = MOCK_MOVIES.filter(movie => 
       movie.title.toLowerCase().includes(query.toLowerCase()) || 
       movie.overview.toLowerCase().includes(query.toLowerCase())
     )
 
+    if (filters?.year) {
+      filteredMovies = filteredMovies.filter(movie => 
+        new Date(movie.release_date).getFullYear() === filters.year
+      )
+    }
+
+    const perPage = 20
+    const startIndex = (validPage - 1) * perPage
+    const endIndex = startIndex + perPage
+    const movies = filteredMovies.slice(startIndex, endIndex)
+
     return {
-      page,
-      results: filteredMovies,
-      total_pages: 1,
+      page: validPage,
+      results: movies,
+      total_pages: Math.ceil(filteredMovies.length / perPage),
       total_results: filteredMovies.length
     }
   }
