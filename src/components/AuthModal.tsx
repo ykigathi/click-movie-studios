@@ -5,7 +5,7 @@ import { Input } from './ui/input'
 import { Label } from './ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card'
 import { Alert, AlertDescription } from './ui/alert'
-import { Dialog, DialogContent } from './ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog'
 import { Loader2, Mail, Lock, User } from 'lucide-react'
 
 interface AuthModalProps {
@@ -62,18 +62,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({ open, onClose }) => {
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {mode === 'signin' ? 'Welcome Back' : 'Create Account'}
+          </DialogTitle>
+          <DialogDescription>
+            {mode === 'signin' 
+              ? 'Sign in to access your watchlist and recommendations' 
+              : 'Join MovieApp to save your favorite movies'
+            }
+          </DialogDescription>
+        </DialogHeader>
         <Card className="border-0 shadow-none">
-          <CardHeader className="text-center">
-            <CardTitle>
-              {mode === 'signin' ? 'Welcome Back' : 'Create Account'}
-            </CardTitle>
-            <CardDescription>
-              {mode === 'signin' 
-                ? 'Sign in to access your watchlist and recommendations' 
-                : 'Join MovieApp to save your favorite movies'
-              }
-            </CardDescription>
-          </CardHeader>
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
               {error && (

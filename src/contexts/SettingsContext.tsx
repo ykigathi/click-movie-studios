@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { AppSettings, SettingsContextType } from '../types'
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from '../config/settings'
+import { themeManager } from '../utils/theme'
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined)
 
@@ -20,8 +21,10 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const savedSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS)
       if (savedSettings) {
-        const parsedSettings = JSON.parse(savedSettings) as AppSettings
-        setSettings({ ...DEFAULT_SETTINGS, ...parsedSettings })
+        const parsedSettings = JSON.parse(savedSettings) as Partial<AppSettings>
+        // Ensure all settings have default values, especially new ones like dataSource
+        const mergedSettings = { ...DEFAULT_SETTINGS, ...parsedSettings }
+        setSettings(mergedSettings)
       }
     } catch (error) {
       console.error('Failed to load settings from localStorage:', error)
@@ -42,10 +45,36 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   const isConfigured = Boolean(settings.apiKey)
 
+  const toggleTheme = () => {
+    themeManager.toggleTheme()
+    // Update settings to reflect theme change
+    const newTheme = themeManager.getTheme()
+    updateSettings({ theme: newTheme })
+  }
+
+  const setTheme = (theme: 'light' | 'dark' | 'system') => {
+    themeManager.setTheme(theme)
+    updateSettings({ theme })
+  }
+
+  const setDataSource = (dataSource: 'live' | 'demo') => {
+    updateSettings({ dataSource })
+  }
+
+  // Automatically determine data source based on API key and user preference
+  const shouldUseLiveMode = settings.apiKey && settings.dataSource === 'live'
+  const isLiveMode = shouldUseLiveMode
+  const isDemoMode = !shouldUseLiveMode
+
   const value: SettingsContextType = {
     settings,
     updateSettings,
-    isConfigured
+    isConfigured,
+    toggleTheme,
+    setTheme,
+    setDataSource,
+    isLiveMode,
+    isDemoMode
   }
 
   return (

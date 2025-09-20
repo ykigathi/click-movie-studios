@@ -5,4 +5,3 @@ export const supabase = createClient(
   `https://${projectId}.supabase.co`,
   publicAnonKey
 )
-

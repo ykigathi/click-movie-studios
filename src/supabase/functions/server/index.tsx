@@ -1,8 +1,7 @@
-import { Hono } from "hono"
-import { logger } from "hono/logger"
-import { cors } from "hono/cors"
-// import { createClient } from "npm:@supabase/supabase-js@2.39.3"
-import { createClient } from '@supabase/supabase-js'
+import { Hono } from "npm:hono@4.6.3"
+import { logger } from "npm:hono/logger"
+import { cors } from "npm:hono/cors"
+import { createClient } from "npm:@supabase/supabase-js@2.39.3"
 import * as kv from './kv_store.tsx'
 
 const app = new Hono()
@@ -88,10 +87,8 @@ const MOCK_POPULAR_MOVIES = [
 
 // Initialize Supabase client
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-  // Deno.env.get('SUPABASE_URL')!,
-  // Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  Deno.env.get('SUPABASE_URL')!,
+  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 )
 
 // Get popular movies
