@@ -1,6 +1,8 @@
+// UserContext.tsx
 import React, { createContext, useContext, useEffect, useState } from 'react'
 import { User, UserData, UserContextType, UserProfile, UserPreferences, UserNotification } from '../types'
 import { STORAGE_KEYS, DEMO_CREDENTIALS } from '../config/settings'
+import { supabase } from '../utils/supabase/client'
 
 const UserContext = createContext<UserContextType | undefined>(undefined)
 
@@ -25,55 +27,142 @@ const DEFAULT_USER_DATA: UserData = {
   }
 }
 
+// Helper function to convert Supabase user to our User type
+const mapSupabaseUserToUser = (supabaseUser: any, userData?: UserData): User => {
+  return {
+    id: supabaseUser.id,
+    email: supabaseUser.email,
+    name: supabaseUser.user_metadata?.name || supabaseUser.email?.split('@')[0] || 'User',
+    role: supabaseUser.user_metadata?.role || 'user',
+    avatar: supabaseUser.user_metadata?.avatar,
+    createdAt: new Date(supabaseUser.created_at),
+    lastLoginAt: new Date(),
+    preferences: {
+      favoriteGenres: supabaseUser.user_metadata?.preferences?.favoriteGenres || [],
+      language: supabaseUser.user_metadata?.preferences?.language || 'en-US',
+      includeAdult: supabaseUser.user_metadata?.preferences?.includeAdult || false,
+      theme: supabaseUser.user_metadata?.preferences?.theme || 'system',
+      notifications: {
+        email: supabaseUser.user_metadata?.preferences?.notifications?.email || true,
+        push: supabaseUser.user_metadata?.preferences?.notifications?.push || true,
+        newMovies: supabaseUser.user_metadata?.preferences?.notifications?.newMovies || true,
+        replies: supabaseUser.user_metadata?.preferences?.notifications?.replies || true
+      }
+    },
+    profile: {
+      bio: supabaseUser.user_metadata?.profile?.bio || '',
+      favoriteGenres: supabaseUser.user_metadata?.profile?.favoriteGenres || [],
+      notifications: supabaseUser.user_metadata?.profile?.notifications || [],
+      movieHistory: supabaseUser.user_metadata?.profile?.movieHistory || [],
+      socialStats: {
+        totalLikes: supabaseUser.user_metadata?.profile?.socialStats?.totalLikes || 0,
+        totalComments: supabaseUser.user_metadata?.profile?.socialStats?.totalComments || 0,
+        totalReviews: supabaseUser.user_metadata?.profile?.socialStats?.totalReviews || 0
+      }
+    }
+  }
+}
+
 export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null)
   const [userData, setUserData] = useState<UserData>(DEFAULT_USER_DATA)
   const [loading, setLoading] = useState(true)
+  const [supabaseSession, setSupabaseSession] = useState<Session | null>(null)
 
-  // Load user data from localStorage on mount
+  // Load user data from localStorage and Supabase session on mount
   useEffect(() => {
-    try {
-      const savedUser = localStorage.getItem(STORAGE_KEYS.USER)
-      const savedUserData = localStorage.getItem(STORAGE_KEYS.USER_DATA)
-      
-      if (savedUser) {
-        const parsedUser = JSON.parse(savedUser) as User
-        setUser(parsedUser)
+    const initializeAuth = async () => {
+      try {
+        // First, try to get the current session from Supabase
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error('Error getting session:', error)
+        }
+        
+        if (session?.user) {
+          setSupabaseSession(session)
+          const mappedUser = mapSupabaseUserToUser(session.user)
+          setUser(mappedUser)
+          
+          // Load user data from localStorage
+          const savedUserData = localStorage.getItem(STORAGE_KEYS.USER_DATA)
+          if (savedUserData) {
+            const parsedUserData = JSON.parse(savedUserData) as UserData
+            setUserData({ ...DEFAULT_USER_DATA, ...parsedUserData })
+          }
+        } else {
+          // Fallback to localStorage for demo users
+          const savedUser = localStorage.getItem(STORAGE_KEYS.USER)
+          const savedUserData = localStorage.getItem(STORAGE_KEYS.USER_DATA)
+          
+          if (savedUser) {
+            const parsedUser = JSON.parse(savedUser) as User
+            setUser(parsedUser)
+          }
+          
+          if (savedUserData) {
+            const parsedUserData = JSON.parse(savedUserData) as UserData
+            setUserData({ ...DEFAULT_USER_DATA, ...parsedUserData })
+          }
+        }
+      } catch (error) {
+        console.error('Failed to initialize auth:', error)
+      } finally {
+        setLoading(false)
       }
-      
-      if (savedUserData) {
-        const parsedUserData = JSON.parse(savedUserData) as UserData
-        setUserData({ ...DEFAULT_USER_DATA, ...parsedUserData })
-      }
-    } catch (error) {
-      console.error('Failed to load user data from localStorage:', error)
-    } finally {
-      setLoading(false)
     }
+
+    initializeAuth()
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_IN' && session?.user) {
+        setSupabaseSession(session)
+        const mappedUser = mapSupabaseUserToUser(session.user)
+        setUser(mappedUser)
+        
+        // Load user data for this user
+        const userSpecificData = localStorage.getItem(`${STORAGE_KEYS.USER_DATA}_${session.user.id}`)
+        if (userSpecificData) {
+          const parsedUserData = JSON.parse(userSpecificData) as UserData
+          setUserData({ ...DEFAULT_USER_DATA, ...parsedUserData })
+        }
+      } else if (event === 'SIGNED_OUT') {
+        setSupabaseSession(null)
+        setUser(null)
+        setUserData(DEFAULT_USER_DATA)
+      } else if (event === 'USER_UPDATED' && session?.user) {
+        const mappedUser = mapSupabaseUserToUser(session.user)
+        setUser(mappedUser)
+      }
+    })
+
+    return () => subscription.unsubscribe()
   }, [])
 
   // Save user data to localStorage whenever it changes
   useEffect(() => {
-    if (!loading) {
+    if (!loading && user) {
       try {
-        if (user) {
+        const storageKey = supabaseSession?.user?.id 
+          ? `${STORAGE_KEYS.USER_DATA}_${supabaseSession.user.id}`
+          : STORAGE_KEYS.USER_DATA
+        
+        localStorage.setItem(storageKey, JSON.stringify(userData))
+        
+        // Also save user info for demo users
+        if (!supabaseSession) {
           localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user))
-          localStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(userData))
-        } else {
-          localStorage.removeItem(STORAGE_KEYS.USER)
-          localStorage.removeItem(STORAGE_KEYS.USER_DATA)
         }
       } catch (error) {
         console.error('Failed to save user data to localStorage:', error)
       }
     }
-  }, [user, userData, loading])
+  }, [user, userData, loading, supabaseSession])
 
   const signIn = async (email: string, password: string) => {
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    // Check demo credentials first
+    // Check demo credentials first (they still work without Supabase)
     if (email === DEMO_CREDENTIALS.USER.email && password === DEMO_CREDENTIALS.USER.password) {
       const demoUser: User = {
         id: 'demo-user',
@@ -107,38 +196,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
               fromUserId: 'user2',
               fromUserName: 'MovieBuff2023',
               read: false,
-              createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000) // 2 hours ago
-            },
-            {
-              id: '2',
-              type: 'comment',
-              title: 'New comment on your review',
-              message: 'CinemaLover commented on your review of "The Godfather"',
-              movieId: 2,
-              fromUserId: 'user3',
-              fromUserName: 'CinemaLover',
-              read: false,
-              createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000) // 4 hours ago
-            },
-            {
-              id: '3',
-              type: 'reply',
-              title: 'Reply to your comment',
-              message: 'FilmCritic replied to your comment on "The Dark Knight"',
-              movieId: 3,
-              fromUserId: 'user4',
-              fromUserName: 'FilmCritic',
-              read: true,
-              createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day ago
-            },
-            {
-              id: '4',
-              type: 'new_movie',
-              title: 'New movie added',
-              message: 'A new movie "Dune: Part Two" has been added to the collection',
-              movieId: 7,
-              read: true,
-              createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000) // 3 days ago
+              createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000)
             }
           ],
           movieHistory: [],
@@ -188,102 +246,189 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(adminUser)
       return
     }
-    
-    // Simple validation for other credentials
-    if (!email || !password) {
-      throw new Error('Email and password are required')
-    }
-    
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters')
-    }
 
-    const newUser: User = {
-      id: Date.now().toString(),
+    // For non-demo users, use Supabase authentication
+    const { data, error } = await supabase.auth.signInWithPassword({
       email,
-      name: email.split('@')[0],
-      role: 'user',
-      createdAt: new Date(),
-      lastLoginAt: new Date(),
-      preferences: {
-        favoriteGenres: [],
-        language: 'en-US',
-        includeAdult: false,
-        theme: 'system',
-        notifications: {
-          email: true,
-          push: true,
-          newMovies: true,
-          replies: true
-        }
-      },
-      profile: {
-        favoriteGenres: [],
-        notifications: [],
-        movieHistory: [],
-        socialStats: {
-          totalLikes: 0,
-          totalComments: 0,
-          totalReviews: 0
-        }
-      }
+      password,
+    })
+
+    if (error) {
+      throw new Error(error.message)
     }
 
-    setUser(newUser)
+    if (!data.user) {
+      throw new Error('Authentication failed')
+    }
+
+    const mappedUser = mapSupabaseUserToUser(data.user)
+    setUser(mappedUser)
+    setSupabaseSession(data.session)
   }
 
-  const signUp = async (email: string, password: string, name: string) => {
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1200))
-    
-    // Simple validation for demo
-    if (!email || !password || !name) {
-      throw new Error('All fields are required')
-    }
-    
-    if (password.length < 6) {
-      throw new Error('Password must be at least 6 characters')
-    }
-
-    const newUser: User = {
-      id: Date.now().toString(),
+  const signUp = async (email: string, password: string, name?: string) => {
+    const { data, error } = await supabase.auth.signUp({
       email,
-      name: name.trim(),
-      role: 'user',
-      createdAt: new Date(),
-      lastLoginAt: new Date(),
-      preferences: {
-        favoriteGenres: [],
-        language: 'en-US',
-        includeAdult: false,
-        theme: 'system',
-        notifications: {
-          email: true,
-          push: true,
-          newMovies: true,
-          replies: true
-        }
-      },
-      profile: {
-        favoriteGenres: [],
-        notifications: [],
-        movieHistory: [],
-        socialStats: {
-          totalLikes: 0,
-          totalComments: 0,
-          totalReviews: 0
+      password,
+      options: {
+        data: {
+          name: name?.trim() || email.split('@')[0],
+          role: 'user',
+          preferences: {
+            favoriteGenres: [],
+            language: 'en-US',
+            includeAdult: false,
+            theme: 'system',
+            notifications: {
+              email: true,
+              push: true,
+              newMovies: true,
+              replies: true
+            }
+          },
+          profile: {
+            bio: '',
+            favoriteGenres: [],
+            notifications: [],
+            movieHistory: [],
+            socialStats: {
+              totalLikes: 0,
+              totalComments: 0,
+              totalReviews: 0
+            }
+          }
         }
       }
+    })
+
+    if (error) {
+      throw new Error(error.message)
     }
 
-    setUser(newUser)
+    if (!data.user) {
+      throw new Error('Registration failed')
+    }
+
+    const mappedUser = mapSupabaseUserToUser(data.user)
+    setUser(mappedUser)
+    setSupabaseSession(data.session)
   }
 
   const signOut = async () => {
+    if (supabaseSession) {
+      const { error } = await supabase.auth.signOut()
+      if (error) {
+        console.error('Error signing out:', error)
+      }
+    }
+    
     setUser(null)
     setUserData(DEFAULT_USER_DATA)
+    setSupabaseSession(null)
   }
 
+  // Update user profile in Supabase
+  const updateProfile = async (updates: Partial<UserProfile>) => {
+    if (!user || !supabaseSession) return
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          profile: {
+            ...user.profile,
+            ...updates
+          }
+        }
+      })
+
+      if (error) throw error
+
+      // Update local state
+      const updatedUser = {
+        ...user,
+        profile: {
+          ...user.profile,
+          ...updates
+        }
+      }
+      setUser(updatedUser)
+
+    } catch (error) {
+      console.error('Error updating profile:', error)
+      throw error
+    }
+  }
+
+  const uploadAvatar = async (file: File): Promise<string> => {
+    if (!user || !supabaseSession) {
+      throw new Error('User not authenticated')
+    }
+
+    try {
+      // Upload to Supabase Storage
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${user.id}-${Math.random()}.${fileExt}`
+      const filePath = `avatars/${fileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file)
+
+      if (uploadError) throw uploadError
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      // Update user metadata with avatar URL
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { avatar: publicUrl }
+      })
+
+      if (updateError) throw updateError
+
+      // Update local state
+      setUser({ ...user, avatar: publicUrl })
+      return publicUrl
+
+    } catch (error) {
+      console.error('Error uploading avatar:', error)
+      throw error
+    }
+  }
+
+  const updatePreferences = async (preferences: Partial<UserPreferences>) => {
+    if (!user || !supabaseSession) return
+
+    try {
+      const { error } = await supabase.auth.updateUser({
+        data: {
+          preferences: {
+            ...user.preferences,
+            ...preferences
+          }
+        }
+      })
+
+      if (error) throw error
+
+      const updatedUser = {
+        ...user,
+        preferences: {
+          ...user.preferences,
+          ...preferences
+        }
+      }
+      setUser(updatedUser)
+
+    } catch (error) {
+      console.error('Error updating preferences:', error)
+      throw error
+    }
+  }
+
+  // All the existing user data methods remain the same
   const addToWatchlist = (movieId: number) => {
     setUserData(prev => ({
       ...prev,
@@ -343,51 +488,9 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const newHistory = [movieId, ...prev.viewHistory.filter(id => id !== movieId)]
       return {
         ...prev,
-        viewHistory: newHistory.slice(0, 50) // Keep only last 50 items
+        viewHistory: newHistory.slice(0, 50)
       }
     })
-  }
-
-  // Profile methods
-  const updateProfile = async (updates: Partial<UserProfile>) => {
-    if (!user) return
-
-    const updatedUser = {
-      ...user,
-      profile: {
-        ...user.profile,
-        ...updates
-      }
-    }
-    setUser(updatedUser)
-  }
-
-  const uploadAvatar = async (file: File): Promise<string> => {
-    // Mock implementation - in real app this would upload to a service
-    return new Promise((resolve) => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const dataUrl = reader.result as string
-        if (user) {
-          setUser({...user, avatar: dataUrl})
-        }
-        resolve(dataUrl)
-      }
-      reader.readAsDataURL(file)
-    })
-  }
-
-  const updatePreferences = async (preferences: Partial<UserPreferences>) => {
-    if (!user) return
-
-    const updatedUser = {
-      ...user,
-      preferences: {
-        ...user.preferences,
-        ...preferences
-      }
-    }
-    setUser(updatedUser)
   }
 
   // Notification methods

@@ -9,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Alert, AlertDescription } from '../../components/ui/alert'
 import { Separator } from '../../components/ui/separator'
 import { Film, Eye, EyeOff, Loader2 } from 'lucide-react'
-import { toast } from 'sonner@2.0.3'
+import { toast } from 'sonner'
 
 export const Login: React.FC = () => {
   const navigate = useNavigate()
