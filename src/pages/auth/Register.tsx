@@ -10,7 +10,7 @@ import { Alert, AlertDescription } from '../../components/ui/alert'
 import { Checkbox } from '../../components/ui/checkbox'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select'
 import { Film, Eye, EyeOff, Loader2, Check, X } from 'lucide-react'
-import { toast } from 'sonner@2.0.3'
+import { toast } from 'sonner'
 
 interface PasswordStrength {
   score: number
